@@ -1,0 +1,30 @@
+{
+  "providerType": "OIDC",
+  "issuer": "https://accounts.google.com",
+  "authorizationEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+  "tokenEndpoint": "https://oauth2.googleapis.com/token",
+  "userinfoEndpoint": "https://openidconnect.googleapis.com/v1/userinfo",
+  "jwksUri": "https://www.googleapis.com/oauth2/v3/certs",
+  "ssoLoginUrl": "https://accounts.google.com/o/oauth2/v2/auth?prompt=consent",
+  "clientIdRef": "vault://tenants/acme-corp/google/client-id",
+  "secretRef": "vault://tenants/acme-corp/google/client-secret",
+  "scopes": ["openid", "profile", "email", "groups"],
+  "claimMappings": {
+    "sub": "externalId",
+    "email": "email",
+    "given_name": "firstName",
+    "family_name": "lastName",
+    "name": "displayName",
+    "groups": "groupMembership"
+  },
+  "roleMappingClaim": "groups",
+  "roleMappingClaimValueAttribute": "displayName",
+  "additionalIdpMetadata": {
+    "tenantSpecific": true,
+    "hd": "acme.com",
+    "hostedDomain": "acme.com"
+  },
+  "active": true,
+  "created_at": "2025-06-30T12:00:00Z",
+  "updated_at": "2025-06-30T12:00:00Z"
+}

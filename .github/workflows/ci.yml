@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Backend - Java / Quarkus
+  # -------------------------------------------------------------------------
+  backend:
+    name: Backend (Java 17 + Maven)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+          cache: "maven"
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Build and verify
+        run: cd apps/api && mvn verify -B
+
+  # -------------------------------------------------------------------------
+  # Frontend - Node.js / Vite
+  # -------------------------------------------------------------------------
+  frontend:
+    name: Frontend (Node 20 + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  # -------------------------------------------------------------------------
+  # OPA - Rego Policy Tests
+  # -------------------------------------------------------------------------
+  opa:
+    name: OPA Policies (Rego)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Install OPA
+        run: go install github.com/open-policy-agent/opa@latest
+
+      - name: Run OPA tests
+        run: opa test policies/opa -v --coverage
+
+      - name: Check OPA coverage
+        run: opa test policies/opa -v --coverage --format=json | grep -q '"coverage"'
+
+  # -------------------------------------------------------------------------
+  # Docker Compose - Validate configuration
+  # -------------------------------------------------------------------------
+  docker:
+    name: Docker Compose Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config
+
+  # -------------------------------------------------------------------------
+  # OpenAPI - Validate spec
+  # -------------------------------------------------------------------------
+  openapi:
+    name: OpenAPI Spec Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate OpenAPI spec
+        uses: spectrocloud/spectral-action@v0.5.0
+        with:
+          file_path: contracts/openapi/openapi.yaml
+          severity_threshold: warn

@@ -1,0 +1,31 @@
+C4Context
+  title System Context - Identity Entitlement Broker
+
+  Person(admin, "Enterprise Admin", "Configures tenants, IdPs, role mappings, and entitlements")
+  Person(user, "End User", "Authenticates via SSO and accesses entitled resources")
+  Person(auditor, "Security Auditor", "Reviews audit logs and policy decisions")
+  Person(support, "Support Agent", "Performs impersonated troubleshooting")
+
+  System(broker, "Identity Entitlement Broker", "Multi-tenant identity broker, SCIM provisioning, OPA policy engine, audit logging")
+
+  System_Ext(keycloak, "Keycloak", "Local OIDC provider for development and testing")
+  System_Ext(externalIdp, "Enterprise IdP", "Customer's OIDC or SAML identity provider (Azure AD, Okta, Google Workspace)")
+  System_Ext(scimClient, "SCIM Client", "External provisioning system that pushes users/groups via SCIM 2.0")
+  System_Ext(dashboard, "Admin Dashboard", "Web UI for tenant administration")
+  System_Ext(opa, "OPA Policy Engine", "Open Policy Agent for externalized authorization decisions")
+  System_Ext(database, "MariaDB", "Primary data store for tenants, users, groups, products, and entitlements")
+  System_Ext(auditStore, "Audit Store", "Immutable audit event log")
+
+  Rel(admin, broker, "Configures tenants, IdPs, role mappings, products, entitlements", "HTTPS")
+  Rel(user, externalIdp, "Authenticates", "OIDC/SAML")
+  Rel(externalIdp, broker, "Redirects with OIDC token / SAML assertion", "HTTPS")
+  Rel(broker, keycloak, "Verifies OIDC tokens (dev)", "HTTPS")
+  Rel(broker, opa, "Evaluates policy decisions", "HTTP")
+  Rel(broker, database, "Reads/writes entity data", "JDBC")
+  Rel(broker, auditStore, "Writes immutable audit events", "JDBC")
+  Rel(scimClient, broker, "Provisions users and groups", "SCIM 2.0 / HTTPS")
+  Rel(support, broker, "Performs impersonation for troubleshooting", "HTTPS")
+  Rel(auditor, broker, "Queries audit events and policy decisions", "HTTPS")
+  Rel(dashboard, broker, "Administrative UI", "HTTPS")
+
+  UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="2")

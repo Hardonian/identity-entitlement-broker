@@ -1,0 +1,41 @@
+sequenceDiagram
+  participant Admin as Enterprise Admin
+  participant Broker as Identity Broker
+  participant IdP as Enterprise IdP
+  participant User as End User
+  participant Browser as User Browser
+
+  Note over Admin,Browser: Phase 1: Configuration
+  Admin->>Broker: POST /api/v1/tenants (name, slug)
+  Broker->>Admin: Tenant ID, API credentials
+  Admin->>Broker: POST /tenants/{id}/idp (OIDC config)
+  Broker->>Admin: IdP connection established
+  Admin->>IdP: Configure broker as authorized app
+  Admin->>Broker: POST /tenants/{id}/role-mappings
+  Admin->>Broker: Create products & entitlements
+
+  Note over Admin,Browser: Phase 2: SSO Authentication
+  User->>Browser: Navigate to application
+  Browser->>Broker: Login request
+  Broker->>Browser: 302 Redirect to IdP authorization endpoint
+  Browser->>IdP: GET /authorize (client_id, redirect_uri, scope)
+  IdP->>User: Enterprise login prompt
+  User->>IdP: Enter credentials (+ MFA if required)
+  IdP->>Browser: 302 Redirect with authorization code
+
+  Note over Admin,Browser: Phase 3: Token Exchange
+  Browser->>Broker: GET /auth/callback (code)
+  Broker->>IdP: POST /token (exchange code)
+  IdP->>Broker: ID Token + Access Token
+
+  Note over Admin,Browser: Phase 4: Tenant Resolution
+  Broker->>Broker: Validate ID Token signature (JWKS)
+  Broker->>Broker: Extract claims (email, groups, tenant claim)
+  Broker->>Broker: Resolve tenant from issuer OR tenant_id claim
+  Broker->>Broker: Map external groups to internal roles
+  Broker->>Broker: Compute effective entitlements
+
+  Note over Admin,Browser: Phase 5: JWT Issuance
+  Broker->>User: Return application JWT
+  Note over User: JWT contains:<br/>tenant_id, roles, entitlements
+  User->>Browser: Access application with entitlements

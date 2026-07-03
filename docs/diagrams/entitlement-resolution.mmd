@@ -1,0 +1,40 @@
+graph TD
+  subgraph Sources["Entitlement Sources"]
+    Direct["Direct Assignments<br/>User <- Entitlement"]
+    GroupBySCIM["Group Assignments<br/>Group <- Entitlement"]
+    GroupByMapping["Role Mapping<br/>Role -> Entitlement"]
+  end
+
+  subgraph UserContext["User Context"]
+    User([User])
+    Groups[("User's Groups<br/>(SCIM memberships)")]
+    Roles[("User's Roles<br/>(from role mapping)")]
+  end
+
+  subgraph Resolution["Entitlement Resolution"]
+    Union[Union of all entitlement IDs]
+    Filter[Filter to active entitlements]
+    Enrich[Enrich with product slugs]
+  end
+
+  subgraph Output["Effective Entitlements"]
+    EE1["identity-admin (DIRECT)"]
+    EE2["user-manager (GROUP)"]
+    EE3["basic-view (ROLE_MAPPING)"]
+  end
+
+  User --> Direct
+  User --> Groups
+  Groups --> GroupBySCIM
+  User --> Roles
+  Roles --> GroupByMapping
+
+  Direct --> Union
+  GroupBySCIM --> Union
+  GroupByMapping --> Union
+
+  Union --> Filter
+  Filter --> Enrich
+  Enrich --> EE1
+  Enrich --> EE2
+  Enrich --> EE3

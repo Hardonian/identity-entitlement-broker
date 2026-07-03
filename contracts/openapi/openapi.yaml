@@ -1,0 +1,2559 @@
+openapi: 3.1.0
+info:
+  title: Identity Entitlement Broker API
+  description: |
+    Multi-tenant identity entitlement broker providing OIDC/SAML SSO integration,
+    SCIM-compatible user provisioning, role mapping, entitlement management, OPA-based
+    policy enforcement, and immutable audit logging.
+  version: "1.0.0"
+  contact:
+    name: Identity Broker Team
+    email: team@identitybroker.example.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+servers:
+  - url: http://localhost:8081
+    description: Local development server
+  - url: https://api.identitybroker.example.com
+    description: Production server
+
+security:
+  - bearerAuth: []
+  - devAuth: []
+
+paths:
+  # =========================================================================
+  # System
+  # =========================================================================
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check endpoint
+      description: Returns the health status of the API service.
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: UP
+                timestamp: "2025-06-30T12:00:00Z"
+                checks:
+                  - name: database
+                    status: UP
+                    latency_ms: 2
+                  - name: opa
+                    status: UP
+                    latency_ms: 5
+                  - name: keycloak
+                    status: UP
+                    latency_ms: 12
+        "503":
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: SERVICE_UNAVAILABLE
+                message: "One or more dependencies are unhealthy"
+                status: 503
+                timestamp: "2025-06-30T12:00:00Z"
+
+  /ready:
+    get:
+      tags:
+        - System
+      summary: Readiness check endpoint
+      description: Returns whether the service is ready to accept traffic.
+      operationId: getReady
+      security: []
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: UP
+                timestamp: "2025-06-30T12:00:00Z"
+                checks:
+                  - name: database
+                    status: UP
+                    latency_ms: 3
+                  - name: migrations
+                    status: UP
+
+  /version:
+    get:
+      tags:
+        - System
+      summary: Version endpoint
+      description: Returns the current version of the API.
+      operationId: getVersion
+      security: []
+      responses:
+        "200":
+          description: Version information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+              example:
+                version: "1.0.0"
+                build: "20250630.123456"
+                commit: "a1b2c3d4e5f6"
+                branch: "main"
+
+  # =========================================================================
+  # Tenants
+  # =========================================================================
+  /api/v1/tenants:
+    post:
+      tags:
+        - Tenants
+      summary: Create a new tenant
+      description: Creates a new enterprise tenant with the provided configuration.
+      operationId: createTenant
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTenantRequest"
+            example:
+              name: "Example Corp"
+              slug: "example-corp"
+              metadata:
+                region: "us-east-1"
+                tier: "enterprise"
+      responses:
+        "201":
+          description: Tenant created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+              example:
+                id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                name: "Example Corp"
+                slug: "example-corp"
+                active: true
+                created_at: "2025-06-30T12:00:00Z"
+                updated_at: "2025-06-30T12:00:00Z"
+                metadata:
+                  region: "us-east-1"
+                  tier: "enterprise"
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: VALIDATION_ERROR
+                message: "name is required, slug must be lowercase"
+                status: 400
+                timestamp: "2025-06-30T12:00:00Z"
+        "409":
+          description: Tenant with this slug already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: CONFLICT
+                message: "Tenant with slug 'example-corp' already exists"
+                status: 409
+                timestamp: "2025-06-30T12:00:00Z"
+
+    get:
+      tags:
+        - Tenants
+      summary: List all tenants
+      description: Returns a paginated list of all tenants.
+      operationId: listTenants
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          description: Page number (0-indexed)
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          description: Page size
+          schema:
+            type: integer
+            default: 20
+        - name: active
+          in: query
+          description: Filter by active status
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Paginated list of tenants
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+              example:
+                content:
+                  - id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    name: "Example Corp"
+                    slug: "example-corp"
+                    active: true
+                    created_at: "2025-06-30T12:00:00Z"
+                    updated_at: "2025-06-30T12:00:00Z"
+                totalElements: 1
+                totalPages: 1
+                number: 0
+                size: 20
+
+  /api/v1/tenants/{tenantId}:
+    get:
+      tags:
+        - Tenants
+      summary: Get tenant by ID
+      description: Returns a single tenant by its unique identifier.
+      operationId: getTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Tenant found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Tenant not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      tags:
+        - Tenants
+      summary: Update tenant configuration
+      description: Updates an existing tenant's configuration.
+      operationId: updateTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTenantRequest"
+      responses:
+        "200":
+          description: Tenant updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tenant"
+        "404":
+          description: Tenant not found
+
+    delete:
+      tags:
+        - Tenants
+      summary: Deactivate a tenant
+      description: Deactivates (soft-deletes) a tenant. The tenant is marked inactive but data is preserved.
+      operationId: deactivateTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Tenant deactivated (no content)
+
+  # =========================================================================
+  # IdP Connections
+  # =========================================================================
+  /api/v1/tenants/{tenantId}/idp:
+    post:
+      tags:
+        - IdP Connections
+      summary: Register an IdP provider
+      description: Registers a new identity provider (OIDC or SAML) for the specified tenant.
+      operationId: registerIdP
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterIdPRequest"
+            example:
+              providerType: "OIDC"
+              issuer: "https://accounts.google.com"
+              clientIdRef: "vault://tenants/example-corp/google-client"
+              secretRef: "vault://tenants/example-corp/google-secret"
+              jwksUri: "https://www.googleapis.com/oauth2/v3/certs"
+              ssoLoginUrl: "https://accounts.google.com/o/oauth2/v2/auth"
+              claimMappings:
+                sub: "externalId"
+                email: "email"
+                name: "displayName"
+              active: true
+      responses:
+        "201":
+          description: IdP registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPConnection"
+              example:
+                id: "b2c3d4e5-f6a7-8901-bcde-f12345678901"
+                tenantId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                providerType: "OIDC"
+                issuer: "https://accounts.google.com"
+                clientIdRef: "vault://tenants/example-corp/google-client"
+                jwksUri: "https://www.googleapis.com/oauth2/v3/certs"
+                ssoLoginUrl: "https://accounts.google.com/o/oauth2/v2/auth"
+                claimMappings:
+                  sub: "externalId"
+                  email: "email"
+                  name: "displayName"
+                active: true
+                created_at: "2025-06-30T12:00:00Z"
+        "404":
+          description: Tenant not found
+
+    get:
+      tags:
+        - IdP Connections
+      summary: List IdP connections for a tenant
+      operationId: listIdPs
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of IdP connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IdPConnection"
+
+  /api/v1/tenants/{tenantId}/idp/{idpId}:
+    get:
+      tags:
+        - IdP Connections
+      summary: Get IdP connection details
+      operationId: getIdP
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: idpId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: IdP connection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPConnection"
+        "404":
+          description: IdP or tenant not found
+
+    put:
+      tags:
+        - IdP Connections
+      summary: Update IdP connection
+      operationId: updateIdP
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: idpId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIdPRequest"
+      responses:
+        "200":
+          description: IdP updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdPConnection"
+        "404":
+          description: IdP or tenant not found
+
+    delete:
+      tags:
+        - IdP Connections
+      summary: Remove IdP connection
+      operationId: deleteIdP
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: idpId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: IdP removed
+
+  # =========================================================================
+  # SCIM Users
+  # =========================================================================
+  /scim/v2/Users:
+    post:
+      tags:
+        - SCIM Users
+      summary: Create a SCIM user
+      description: Provisions a new user via SCIM 2.0 protocol.
+      operationId: createScimUser
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUser"
+            example:
+              schemas:
+                - "urn:ietf:params:scim:schemas:core:2.0:User"
+              userName: "jane.doe@example.com"
+              name:
+                givenName: "Jane"
+                familyName: "Doe"
+              emails:
+                - value: "jane.doe@example.com"
+                  type: "work"
+                  primary: true
+              displayName: "Jane Doe"
+              active: true
+              externalId: "ext-jane-001"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+              example:
+                schemas:
+                  - "urn:ietf:params:scim:schemas:core:2.0:User"
+                id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                userName: "jane.doe@example.com"
+                name:
+                  givenName: "Jane"
+                  familyName: "Doe"
+                emails:
+                  - value: "jane.doe@example.com"
+                    type: "work"
+                    primary: true
+                displayName: "Jane Doe"
+                active: true
+                externalId: "ext-jane-001"
+                meta:
+                  resourceType: "User"
+                  created: "2025-06-30T12:00:00Z"
+                  lastModified: "2025-06-30T12:00:00Z"
+                  location: "http://localhost:8081/scim/v2/Users/c3d4e5f6-a7b8-9012-cdef-123456789012"
+        "400":
+          description: Invalid SCIM payload
+
+    get:
+      tags:
+        - SCIM Users
+      summary: List SCIM users
+      operationId: listScimUsers
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: filter
+          in: query
+          description: SCIM filter expression (e.g., userName eq "jane@example.com")
+          schema:
+            type: string
+        - name: startIndex
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: count
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Paginated SCIM user list
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+
+  /scim/v2/Users/{userId}:
+    get:
+      tags:
+        - SCIM Users
+      summary: Get SCIM user by ID
+      operationId: getScimUser
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User found
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "404":
+          description: User not found
+
+    put:
+      tags:
+        - SCIM Users
+      summary: Update SCIM user (full replacement)
+      operationId: updateScimUser
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimUser"
+      responses:
+        "200":
+          description: User updated
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+        "404":
+          description: User not found
+
+    patch:
+      tags:
+        - SCIM Users
+      summary: Patch SCIM user (partial update)
+      operationId: patchScimUser
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchOperation"
+            example:
+              schemas:
+                - "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              Operations:
+                - op: "replace"
+                  path: "active"
+                  value: false
+      responses:
+        "200":
+          description: User patched
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimUser"
+
+    delete:
+      tags:
+        - SCIM Users
+      summary: Delete SCIM user (deactivate)
+      operationId: deleteScimUser
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: User deactivated
+
+  # =========================================================================
+  # SCIM Groups
+  # =========================================================================
+  /scim/v2/Groups:
+    post:
+      tags:
+        - SCIM Groups
+      summary: Create a SCIM group
+      operationId: createScimGroup
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimGroup"
+            example:
+              schemas:
+                - "urn:ietf:params:scim:schemas:core:2.0:Group"
+              displayName: "Identity Admins"
+              members:
+                - value: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                  display: "jane.doe@example.com"
+      responses:
+        "201":
+          description: Group created
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+
+    get:
+      tags:
+        - SCIM Groups
+      summary: List SCIM groups
+      operationId: listScimGroups
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: filter
+          in: query
+          schema:
+            type: string
+        - name: startIndex
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: count
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Paginated group list
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimListResponse"
+
+  /scim/v2/Groups/{groupId}:
+    get:
+      tags:
+        - SCIM Groups
+      summary: Get SCIM group
+      operationId: getScimGroup
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Group found
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+        "404":
+          description: Group not found
+
+    put:
+      tags:
+        - SCIM Groups
+      summary: Update SCIM group
+      operationId: updateScimGroup
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimGroup"
+      responses:
+        "200":
+          description: Group updated
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+
+    patch:
+      tags:
+        - SCIM Groups
+      summary: Patch SCIM group
+      operationId: patchScimGroup
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/scim+json:
+            schema:
+              $ref: "#/components/schemas/ScimPatchOperation"
+      responses:
+        "200":
+          description: Group patched
+          content:
+            application/scim+json:
+              schema:
+                $ref: "#/components/schemas/ScimGroup"
+
+    delete:
+      tags:
+        - SCIM Groups
+      summary: Delete SCIM group
+      operationId: deleteScimGroup
+      parameters:
+        - name: X-Tenant-Id
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-Actor-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Group deleted
+
+  # =========================================================================
+  # Role Mappings
+  # =========================================================================
+  /api/v1/tenants/{tenantId}/role-mappings:
+    post:
+      tags:
+        - Role Mappings
+      summary: Create a role mapping
+      description: Maps an external role/group/claim to internal roles and entitlements.
+      operationId: createRoleMapping
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleMappingRequest"
+            example:
+              sourceType: "OIDC_CLAIM"
+              sourceValue: "groups"
+              externalRoleName: "IdentityAdministrators"
+              internalRoles:
+                - "admin"
+              entitlements:
+                - "identity-admin"
+              priority: 100
+              active: true
+      responses:
+        "201":
+          description: Role mapping created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleMapping"
+
+    get:
+      tags:
+        - Role Mappings
+      summary: List role mappings for a tenant
+      operationId: listRoleMappings
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: List of role mappings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RoleMapping"
+
+  /api/v1/tenants/{tenantId}/role-mappings/{mappingId}:
+    get:
+      tags:
+        - Role Mappings
+      summary: Get role mapping
+      operationId: getRoleMapping
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mappingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Role mapping found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleMapping"
+
+    put:
+      tags:
+        - Role Mappings
+      summary: Update role mapping
+      operationId: updateRoleMapping
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mappingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleMappingRequest"
+      responses:
+        "200":
+          description: Role mapping updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoleMapping"
+
+    delete:
+      tags:
+        - Role Mappings
+      summary: Delete role mapping
+      operationId: deleteRoleMapping
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: mappingId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Role mapping deleted
+
+  /api/v1/tenants/{tenantId}/role-mappings/resolve:
+    post:
+      tags:
+        - Role Mappings
+      summary: Resolve roles from external claims
+      description: Takes external identity claims/attributes and resolves them to internal roles and entitlements.
+      operationId: resolveRoleMappings
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveRolesRequest"
+            example:
+              sourceType: "OIDC_CLAIM"
+              claims:
+                groups:
+                  - "IdentityAdministrators"
+                  - "Auditors"
+                roles:
+                  - "admin"
+      responses:
+        "200":
+          description: Resolved roles and entitlements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveRolesResponse"
+              example:
+                resolvedRoles:
+                  - "admin"
+                  - "auditor"
+                resolvedEntitlements:
+                  - "identity-admin"
+                  - "audit-viewer"
+                matchedMappings:
+                  - id: "mapping-id-1"
+                    sourceType: "OIDC_CLAIM"
+                    externalRoleName: "IdentityAdministrators"
+                    priority: 100
+
+  # =========================================================================
+  # Products
+  # =========================================================================
+  /api/v1/products:
+    post:
+      tags:
+        - Products
+      summary: Create a product
+      description: Creates a new product that entitlements can be scoped to.
+      operationId: createProduct
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProductRequest"
+            example:
+              name: "Identity Core"
+              slug: "identity-core"
+              description: "Core identity and access management services"
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+              example:
+                id: "d4e5f6a7-b8c9-0123-defa-1234567890ab"
+                name: "Identity Core"
+                slug: "identity-core"
+                description: "Core identity and access management services"
+                active: true
+                created_at: "2025-06-30T12:00:00Z"
+                updated_at: "2025-06-30T12:00:00Z"
+
+    get:
+      tags:
+        - Products
+      summary: List products
+      operationId: listProducts
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Product"
+
+  /api/v1/products/{productId}:
+    get:
+      tags:
+        - Products
+      summary: Get product by ID
+      operationId: getProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Product found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Product not found
+
+    put:
+      tags:
+        - Products
+      summary: Update product
+      operationId: updateProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200":
+          description: Product updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+
+    delete:
+      tags:
+        - Products
+      summary: Deactivate product
+      operationId: deactivateProduct
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Product deactivated
+
+  # =========================================================================
+  # Entitlements & Assignments
+  # =========================================================================
+  /api/v1/entitlements:
+    post:
+      tags:
+        - Entitlements
+      summary: Create an entitlement
+      description: Creates a named entitlement scoped to a product.
+      operationId: createEntitlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEntitlementRequest"
+            example:
+              productId: "d4e5f6a7-b8c9-0123-defa-1234567890ab"
+              name: "Identity Admin"
+              slug: "identity-admin"
+              description: "Full administrative access to identity services"
+      responses:
+        "201":
+          description: Entitlement created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlement"
+              example:
+                id: "e5f6a7b8-c9d0-1234-efab-234567890abc"
+                productId: "d4e5f6a7-b8c9-0123-defa-1234567890ab"
+                name: "Identity Admin"
+                slug: "identity-admin"
+                description: "Full administrative access to identity services"
+                active: true
+                created_at: "2025-06-30T12:00:00Z"
+                updated_at: "2025-06-30T12:00:00Z"
+
+    get:
+      tags:
+        - Entitlements
+      summary: List entitlements
+      operationId: listEntitlements
+      parameters:
+        - name: productId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated list of entitlements
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+
+  /api/v1/entitlements/{entitlementId}:
+    get:
+      tags:
+        - Entitlements
+      summary: Get entitlement
+      operationId: getEntitlement
+      parameters:
+        - name: entitlementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Entitlement found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlement"
+
+    put:
+      tags:
+        - Entitlements
+      summary: Update entitlement
+      operationId: updateEntitlement
+      parameters:
+        - name: entitlementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEntitlementRequest"
+      responses:
+        "200":
+          description: Entitlement updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entitlement"
+
+    delete:
+      tags:
+        - Entitlements
+      summary: Deactivate entitlement
+      operationId: deactivateEntitlement
+      parameters:
+        - name: entitlementId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Entitlement deactivated
+
+  /api/v1/assignments:
+    post:
+      tags:
+        - Entitlements
+      summary: Assign entitlement to user
+      description: Assigns an entitlement to a user (direct assignment).
+      operationId: assignEntitlement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssignmentRequest"
+            example:
+              entitlementId: "e5f6a7b8-c9d0-1234-efab-234567890abc"
+              userId: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+      responses:
+        "201":
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+              example:
+                id: "f6a7b8c9-d0e1-2345-fabc-345678901bcd"
+                entitlementId: "e5f6a7b8-c9d0-1234-efab-234567890abc"
+                userId: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                assignmentType: "DIRECT"
+                active: true
+                created_at: "2025-06-30T12:00:00Z"
+
+    get:
+      tags:
+        - Entitlements
+      summary: List assignments
+      operationId: listAssignments
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: entitlementId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated list of assignments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedResponse"
+
+  /api/v1/assignments/{assignmentId}:
+    get:
+      tags:
+        - Entitlements
+      summary: Get assignment
+      operationId: getAssignment
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assignment found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+
+    delete:
+      tags:
+        - Entitlements
+      summary: Revoke assignment
+      operationId: revokeAssignment
+      parameters:
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Assignment revoked
+
+  /api/v1/assignments/user/{userId}:
+    get:
+      tags:
+        - Entitlements
+      summary: Get effective entitlements for a user
+      description: Returns the union of direct and group-based entitlements for the specified user.
+      operationId: getEffectiveEntitlements
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Effective entitlements
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EffectiveEntitlement"
+              example:
+                - entitlementId: "e5f6a7b8-c9d0-1234-efab-234567890abc"
+                  entitlementName: "Identity Admin"
+                  entitlementSlug: "identity-admin"
+                  productSlug: "identity-core"
+                  assignmentType: "DIRECT"
+                - entitlementId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                  entitlementName: "Audit Viewer"
+                  entitlementSlug: "audit-viewer"
+                  productSlug: "audit-service"
+                  assignmentType: "GROUP"
+
+  # =========================================================================
+  # Policy
+  # =========================================================================
+  /api/v1/policy/decide:
+    post:
+      tags:
+        - Policy
+      summary: Evaluate access policy decision
+      description: Sends an access request to OPA for policy evaluation. Returns allow/deny with reasoning.
+      operationId: decidePolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyDecisionRequest"
+            example:
+              tenantId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+              actor: "jane.doe@example.com"
+              subject: "jane.doe@example.com"
+              action: "access"
+              resource: "identity-core"
+              roles:
+                - "admin"
+              entitlements:
+                - "identity-admin"
+      responses:
+        "200":
+          description: Policy decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyDecisionResponse"
+              example:
+                allowed: true
+                matchedRule: "allow_access"
+                denyReasons: []
+                decisionTimeMs: 3
+        "403":
+          description: Policy denied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyDecisionResponse"
+              example:
+                allowed: false
+                matchedRule: "denied"
+                denyReasons:
+                  - "actor 'jane.doe@example.com' lacks entitlement for resource 'identity-core' in tenant 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'"
+                decisionTimeMs: 2
+
+  /api/v1/policy/check-access:
+    post:
+      tags:
+        - Policy
+      summary: Quick access check (lightweight)
+      description: Lightweight access check returning only true/false and HTTP 200/403.
+      operationId: checkAccess
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyDecisionRequest"
+      responses:
+        "200":
+          description: Access granted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  allowed:
+                    type: boolean
+                example:
+                  allowed: true
+        "403":
+          description: Access denied
+
+  # =========================================================================
+  # Audit
+  # =========================================================================
+  /api/v1/audit:
+    get:
+      tags:
+        - Audit
+      summary: List audit events
+      description: Returns paginated audit events for the current tenant.
+      operationId: listAuditEvents
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: eventType
+          in: query
+          description: Filter by event type
+          schema:
+            type: string
+            enum:
+              - USER_CREATED
+              - USER_UPDATED
+              - USER_DEACTIVATED
+              - USER_DELETED
+              - GROUP_CREATED
+              - GROUP_UPDATED
+              - GROUP_DELETED
+              - ENTITLEMENT_ASSIGNED
+              - ENTITLEMENT_REVOKED
+              - POLICY_EVALUATED
+              - POLICY_DENIED
+              - TENANT_CREATED
+              - TENANT_UPDATED
+              - TENANT_DEACTIVATED
+              - IDP_REGISTERED
+              - IDP_UPDATED
+              - IDP_REMOVED
+              - ROLE_MAPPING_CREATED
+              - ROLE_MAPPING_UPDATED
+              - ROLE_MAPPING_DELETED
+              - SSO_LOGIN
+              - SSO_LOGIN_FAILED
+              - IMPERSONATION_STARTED
+              - IMPERSONATION_ENDED
+              - ACCESS_DENIED
+        - name: actorId
+          in: query
+          description: Filter by actor ID
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Start date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Paginated audit events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAuditResponse"
+              example:
+                content:
+                  - id: "b7c8d9e0-f1a2-3456-bcde-789012345678"
+                    eventType: "USER_CREATED"
+                    tenantId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    actorId: "scim-service"
+                    targetId: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+                    details:
+                      userName: "jane.doe@example.com"
+                      provisionedBy: "Azure AD SCIM"
+                    timestamp: "2025-06-30T12:00:00Z"
+                totalElements: 1
+                totalPages: 1
+                number: 0
+                size: 20
+
+  /api/v1/audit/search:
+    post:
+      tags:
+        - Audit
+      summary: Search audit events
+      description: Advanced search across audit events with multiple filters.
+      operationId: searchAudit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditSearchRequest"
+            example:
+              eventTypes:
+                - "USER_CREATED"
+                - "ENTITLEMENT_ASSIGNED"
+              actorIds:
+                - "scim-service"
+              from: "2025-06-01T00:00:00Z"
+              to: "2025-06-30T23:59:59Z"
+              fullText: "jane.doe"
+              page: 0
+              size: 20
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedAuditResponse"
+
+  /api/v1/audit/{eventId}:
+    get:
+      tags:
+        - Audit
+      summary: Get audit event details
+      operationId: getAuditEvent
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Audit event found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEvent"
+        "404":
+          description: Audit event not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token from OIDC provider containing tenant_id claim
+    devAuth:
+      type: apiKey
+      in: header
+      name: X-Tenant-Id
+      description: Development-only header-based tenant context (when DEV_AUTH_ENABLED=true)
+
+  schemas:
+    # -----------------------------------------------------------------------
+    # System
+    # -----------------------------------------------------------------------
+    HealthResponse:
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN, DEGRADED]
+        timestamp:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/HealthCheck"
+
+    HealthCheck:
+      type: object
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [UP, DOWN]
+        latency_ms:
+          type: integer
+
+    VersionResponse:
+      type: object
+      properties:
+        version:
+          type: string
+        build:
+          type: string
+        commit:
+          type: string
+        branch:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code
+        message:
+          type: string
+          description: Human-readable error description
+        status:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: object
+          description: Additional error details (e.g., validation errors)
+      required:
+        - error
+        - message
+        - status
+        - timestamp
+
+    # -----------------------------------------------------------------------
+    # Pagination
+    # -----------------------------------------------------------------------
+    PaginatedResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            type: object
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        number:
+          type: integer
+        size:
+          type: integer
+
+    PaginatedAuditResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        number:
+          type: integer
+        size:
+          type: integer
+
+    # -----------------------------------------------------------------------
+    # Tenant
+    # -----------------------------------------------------------------------
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        metadata:
+          type: object
+
+    CreateTenantRequest:
+      type: object
+      required:
+        - name
+        - slug
+      properties:
+        name:
+          type: string
+          description: Display name for the tenant
+          example: "Example Corp"
+        slug:
+          type: string
+          description: URL-safe unique slug
+          example: "example-corp"
+        metadata:
+          type: object
+          description: Optional key-value metadata
+
+    UpdateTenantRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        metadata:
+          type: object
+
+    # -----------------------------------------------------------------------
+    # IdP Connection
+    # -----------------------------------------------------------------------
+    IdPConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        providerType:
+          type: string
+          enum: [OIDC, SAML]
+        issuer:
+          type: string
+          format: uri
+        clientIdRef:
+          type: string
+        secretRef:
+          type: string
+        jwksUri:
+          type: string
+          format: uri
+        ssoLoginUrl:
+          type: string
+          format: uri
+        metadataUrl:
+          type: string
+          format: uri
+        claimMappings:
+          type: object
+          additionalProperties:
+            type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RegisterIdPRequest:
+      type: object
+      required:
+        - providerType
+        - issuer
+        - clientIdRef
+      properties:
+        providerType:
+          type: string
+          enum: [OIDC, SAML]
+        issuer:
+          type: string
+          format: uri
+        clientIdRef:
+          type: string
+        secretRef:
+          type: string
+        jwksUri:
+          type: string
+          format: uri
+        ssoLoginUrl:
+          type: string
+          format: uri
+        metadataUrl:
+          type: string
+          format: uri
+        claimMappings:
+          type: object
+          additionalProperties:
+            type: string
+        active:
+          type: boolean
+          default: true
+
+    UpdateIdPRequest:
+      type: object
+      properties:
+        providerType:
+          type: string
+          enum: [OIDC, SAML]
+        issuer:
+          type: string
+          format: uri
+        clientIdRef:
+          type: string
+        secretRef:
+          type: string
+        jwksUri:
+          type: string
+          format: uri
+        ssoLoginUrl:
+          type: string
+          format: uri
+        claimMappings:
+          type: object
+        active:
+          type: boolean
+
+    # -----------------------------------------------------------------------
+    # SCIM
+    # -----------------------------------------------------------------------
+    ScimUser:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+          example:
+            - "urn:ietf:params:scim:schemas:core:2.0:User"
+        id:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        name:
+          type: object
+          properties:
+            givenName:
+              type: string
+            familyName:
+              type: string
+            middleName:
+              type: string
+            honorificPrefix:
+              type: string
+            honorificSuffix:
+              type: string
+        displayName:
+          type: string
+        emails:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+                format: email
+              type:
+                type: string
+                enum: [work, home, other]
+              primary:
+                type: boolean
+        phoneNumbers:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+              type:
+                type: string
+                enum: [work, mobile, home, other]
+        active:
+          type: boolean
+        externalId:
+          type: string
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+                format: uuid
+              display:
+                type: string
+              type:
+                type: string
+                default: "direct"
+        meta:
+          type: object
+          properties:
+            resourceType:
+              type: string
+            created:
+              type: string
+              format: date-time
+            lastModified:
+              type: string
+              format: date-time
+            location:
+              type: string
+              format: uri
+
+    ScimGroup:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              value:
+                type: string
+                format: uuid
+              display:
+                type: string
+              type:
+                type: string
+                default: "User"
+        meta:
+          type: object
+          properties:
+            resourceType:
+              type: string
+            created:
+              type: string
+              format: date-time
+            lastModified:
+              type: string
+              format: date-time
+            location:
+              type: string
+              format: uri
+
+    ScimListResponse:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        totalResults:
+          type: integer
+        startIndex:
+          type: integer
+        itemsPerPage:
+          type: integer
+        Resources:
+          type: array
+          items:
+            oneOf:
+              - $ref: "#/components/schemas/ScimUser"
+              - $ref: "#/components/schemas/ScimGroup"
+
+    ScimPatchOperation:
+      type: object
+      properties:
+        schemas:
+          type: array
+          items:
+            type: string
+        Operations:
+          type: array
+          items:
+            type: object
+            properties:
+              op:
+                type: string
+                enum: [add, remove, replace]
+              path:
+                type: string
+              value:
+                type: object
+
+    # -----------------------------------------------------------------------
+    # Role Mapping
+    # -----------------------------------------------------------------------
+    RoleMapping:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        sourceType:
+          type: string
+          enum: [OIDC_CLAIM, SAML_ATTRIBUTE, SCIM_GROUP]
+        sourceValue:
+          type: string
+        externalRoleName:
+          type: string
+        internalRoles:
+          type: array
+          items:
+            type: string
+        entitlements:
+          type: array
+          items:
+            type: string
+        priority:
+          type: integer
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CreateRoleMappingRequest:
+      type: object
+      required:
+        - sourceType
+        - sourceValue
+        - externalRoleName
+        - internalRoles
+        - entitlements
+      properties:
+        sourceType:
+          type: string
+          enum: [OIDC_CLAIM, SAML_ATTRIBUTE, SCIM_GROUP]
+        sourceValue:
+          type: string
+        externalRoleName:
+          type: string
+        internalRoles:
+          type: array
+          items:
+            type: string
+        entitlements:
+          type: array
+          items:
+            type: string
+        priority:
+          type: integer
+          default: 100
+        active:
+          type: boolean
+          default: true
+
+    UpdateRoleMappingRequest:
+      type: object
+      properties:
+        internalRoles:
+          type: array
+          items:
+            type: string
+        entitlements:
+          type: array
+          items:
+            type: string
+        priority:
+          type: integer
+        active:
+          type: boolean
+
+    ResolveRolesRequest:
+      type: object
+      required:
+        - sourceType
+      properties:
+        sourceType:
+          type: string
+          enum: [OIDC_CLAIM, SAML_ATTRIBUTE, SCIM_GROUP]
+        claims:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+
+    ResolveRolesResponse:
+      type: object
+      properties:
+        resolvedRoles:
+          type: array
+          items:
+            type: string
+        resolvedEntitlements:
+          type: array
+          items:
+            type: string
+        matchedMappings:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              sourceType:
+                type: string
+              externalRoleName:
+                type: string
+              priority:
+                type: integer
+
+    # -----------------------------------------------------------------------
+    # Product
+    # -----------------------------------------------------------------------
+    Product:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateProductRequest:
+      type: object
+      required:
+        - name
+        - slug
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    # -----------------------------------------------------------------------
+    # Entitlement
+    # -----------------------------------------------------------------------
+    Entitlement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        productId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateEntitlementRequest:
+      type: object
+      required:
+        - productId
+        - name
+        - slug
+      properties:
+        productId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+
+    UpdateEntitlementRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    # -----------------------------------------------------------------------
+    # Assignment
+    # -----------------------------------------------------------------------
+    Assignment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entitlementId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        assignmentType:
+          type: string
+          enum: [DIRECT, GROUP]
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+
+    CreateAssignmentRequest:
+      type: object
+      required:
+        - entitlementId
+        - userId
+      properties:
+        entitlementId:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+
+    EffectiveEntitlement:
+      type: object
+      properties:
+        entitlementId:
+          type: string
+          format: uuid
+        entitlementName:
+          type: string
+        entitlementSlug:
+          type: string
+        productSlug:
+          type: string
+        assignmentType:
+          type: string
+          enum: [DIRECT, GROUP]
+
+    # -----------------------------------------------------------------------
+    # Policy
+    # -----------------------------------------------------------------------
+    PolicyDecisionRequest:
+      type: object
+      required:
+        - tenantId
+        - actor
+        - subject
+        - action
+        - resource
+      properties:
+        tenantId:
+          type: string
+          format: uuid
+        actor:
+          type: string
+        subject:
+          type: string
+        action:
+          type: string
+          enum: [access, read, manage, impersonate, provision]
+        resource:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+        entitlements:
+          type: array
+          items:
+            type: string
+
+    PolicyDecisionResponse:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        matchedRule:
+          type: string
+        denyReasons:
+          type: array
+          items:
+            type: string
+        decisionTimeMs:
+          type: integer
+
+    # -----------------------------------------------------------------------
+    # Audit
+    # -----------------------------------------------------------------------
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        tenantId:
+          type: string
+          format: uuid
+        actorId:
+          type: string
+        targetId:
+          type: string
+        details:
+          type: object
+        sourceIp:
+          type: string
+        correlationId:
+          type: string
+        immutable:
+          type: boolean
+          default: true
+        timestamp:
+          type: string
+          format: date-time
+
+    AuditSearchRequest:
+      type: object
+      properties:
+        eventTypes:
+          type: array
+          items:
+            type: string
+        actorIds:
+          type: array
+          items:
+            type: string
+        targetIds:
+          type: array
+          items:
+            type: string
+        tenantIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        fullText:
+          type: string
+        page:
+          type: integer
+          default: 0
+        size:
+          type: integer
+          default: 20

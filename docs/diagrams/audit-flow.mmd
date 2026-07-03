@@ -1,0 +1,37 @@
+flowchart TD
+  subgraph Sources["Audit Event Sources"]
+    API["API Resources<br/>(Tenant, Product, Entitlement CRUD)"]
+    SCIM["SCIM Service<br/>(User/Group provisioning)"]
+    Policy["Policy Service<br/>(Policy evaluations & denials)"]
+    SSO["SSO Login Handler<br/>(Authentication events)"]
+    Admin["Admin Actions<br/>(Role mapping, IdP config)"]
+  end
+
+  subgraph Service["Audit Service Layer"]
+    AuditSvc["AuditService"]
+    Builder["EventBuilder<br/>- Generate UUID<br/>- Set timestamp (NOW())<br/>- Inject correlation ID<br/>- Attach source IP & user-agent"]
+  end
+
+  subgraph Storage["Persistence"]
+    DB[("MariaDB<br/>audit_events table")]
+    Index[("Indexes<br/>- tenant_id + timestamp<br/>- event_type<br/>- actor_id<br/>- target_id<br/>- correlation_id")]
+  end
+
+  subgraph Query["Query Layer"]
+    REST["REST API<br/>GET /api/v1/audit"]
+    Search["Search API<br/>POST /api/v1/audit/search"]
+    Filters["Filters<br/>- eventType<br/>- actorId, targetId<br/>- date range (from/to)<br/>- fullText search<br/>- pagination"]
+  end
+
+  Sources --> AuditSvc
+  AuditSvc --> Builder
+  Builder --> DB
+  DB --> Index
+  DB --> REST
+  DB --> Search
+  Search --> Filters
+  REST --> Filters
+
+  style DB fill:#4a90d9,color:#fff
+  style Service fill:#2c3e50,color:#fff
+  style Query fill:#27ae60,color:#fff

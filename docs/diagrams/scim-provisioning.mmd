@@ -1,0 +1,50 @@
+sequenceDiagram
+  participant SCIMClient as SCIM Client (IdP/HRIS)
+  participant API as SCIM REST API
+  participant Validator as SCIM Schema Validator
+  participant Service as ScimProvisioningService
+  participant Policy as OPA Policy Engine
+  participant DB as MariaDB
+  participant Audit as Audit Store
+
+  Note over SCIMClient,Audit: Create User
+  SCIMClient->>API: POST /scim/v2/Users
+  Note over SCIMClient: Headers: X-Tenant-Id, X-Actor-Id
+
+  API->>Validator: Validate SCIM schema
+  Validator->>API: Schema valid (or 400 error)
+
+  API->>Policy: Check provision authorization
+  Policy->>API: Allow decision
+
+  API->>Service: createUser(scimUser)
+  Service->>Service: Map SCIM to ExternalUser entity
+  Service->>Service: Set tenant_id from context
+  Service->>Service: Set externalId, generate broker ID
+
+  Service->>DB: INSERT INTO external_users
+  DB->>Service: User created
+
+  Service->>Audit: Write USER_CREATED event
+  Service->>API: Build SCIM response with meta
+
+  API->>SCIMClient: 201 Created (SCIM JSON)
+  Note over SCIMClient: Response includes id, meta.location
+
+  Note over SCIMClient,Audit: Update User
+  SCIMClient->>API: PUT /scim/v2/Users/{id} (full replace)
+  API->>Validator: Validate schema
+  Validator->>API: Schema valid
+  API->>Service: updateUser(id, scimUser)
+  Service->>DB: UPDATE external_users SET ... WHERE id=:id AND tenant_id=:tid
+  DB->>Service: Row updated
+  Service->>Audit: Write USER_UPDATED event
+  API->>SCIMClient: 200 OK (updated SCIM JSON)
+
+  Note over SCIMClient,Audit: Deactivate User
+  SCIMClient->>API: DELETE /scim/v2/Users/{id}
+  API->>Service: deactivateUser(id)
+  Service->>DB: UPDATE external_users SET active=false WHERE id=:id AND tenant_id=:tid
+  DB->>Service: User deactivated
+  Service->>Audit: Write USER_DEACTIVATED event
+  API->>SCIMClient: 204 No Content

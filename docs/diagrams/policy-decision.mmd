@@ -1,0 +1,37 @@
+sequenceDiagram
+  participant Client as API Client
+  participant Resource as API Resource
+  participant PolicySvc as PolicyService
+  participant OPA as OPA Engine
+  participant Audit as AuditService
+
+  Client->>Resource: Request with JWT
+  Resource->>PolicySvc: decide(policyRequest)
+
+  Note over PolicySvc: Build OPA input from request context
+  Note over PolicySvc: tenant_id (from JWT claim)<br/>actor (from JWT sub)<br/>subject (target user)<br/>action (access/read/manage/impersonate/provision)<br/>resource (product slug)<br/>roles (from JWT)<br/>entitlements (from JWT or computed)
+
+  PolicySvc->>OPA: POST /v1/data/identity
+
+  Note over OPA: Evaluate Rego rules
+  Note over OPA: 1. Load tenants data<br/>2. Check tenant active<br/>3. Evaluate allow_* rules<br/>4. Evaluate deny rules<br/>5. Determine matched_rule
+
+  OPA-->>PolicySvc: { "result": { "allow": true/false, "deny": [...], "matched_rule": "..." } }
+
+  alt OPA returned allow
+    PolicySvc->>Resource: Allow decision
+    Resource->>Audit: Log POLICY_EVALUATED event
+    Resource->>Client: 200 OK (continue request)
+  else OPA returned deny
+    PolicySvc->>Resource: Deny decision with reasons
+    Resource->>Audit: Log POLICY_DENIED event
+    Resource->>Client: 403 Forbidden (with deny reasons)
+  else OPA unavailable
+    PolicySvc->>PolicySvc: Use local fallback policy
+    Note over PolicySvc: Logs warning about OPA fallback
+    alt Fallback allows
+      PolicySvc->>Resource: Allow decision (fallback)
+    else Fallback denies
+      PolicySvc->>Resource: Deny decision (fallback)
+    end
+  end

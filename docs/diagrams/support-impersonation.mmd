@@ -1,0 +1,35 @@
+sequenceDiagram
+    participant Support as Support Agent
+    participant UI as Admin Dashboard
+    participant API as Identity Broker API
+    participant Policy as Policy Service
+    participant OPA as OPA Engine
+    participant Audit as Audit Service
+    participant DB as MariaDB
+
+    Support->>UI: Requests user impersonation
+    UI->>API: POST /api/v1/policy/decide
+    Note over API: action: "impersonate",<br/>actor: "support@admin.com",<br/>subject: "target@acme.com"
+
+    API->>OPA: Evaluate policy (input.roles includes "support-admin")
+    OPA-->>API: {allow: true, matched_rule: "allow_impersonate"}
+
+    API->>Audit: Record policy decision
+    Audit->>DB: INSERT audit_event (action="impersonate", outcome="ALLOWED")
+
+    API-->>UI: {allowed: true, reason: "Support admin impersonation granted"}
+
+    UI->>API: Switch tenant context to target user's tenant
+    Note over API: TenantContext updated to<br/>support admin's tenant scope<br/>(read-only audit context)
+
+    Support->>API: Read user data, entitlements, audit events
+    API->>DB: Query with tenant isolation validation
+    DB-->>API: Results (read-only context)
+
+    API->>Audit: Record all actions during impersonation session
+    Audit->>DB: INSERT audit_event with<br/>actor="support@admin.com",<br/>impersonating="target@acme.com"
+
+    API-->>UI: Display data
+    UI-->>Support: View-only access to customer data
+
+    Note over Support,DB: Session ends - impersonation is logged<br/>with full audit trail including<br/>every action taken during session

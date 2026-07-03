@@ -1,0 +1,162 @@
+version: "3.9"
+
+name: identity-entitlement-broker
+
+networks:
+  broker-net:
+    driver: bridge
+
+volumes:
+  mariadb-data:
+    driver: local
+  keycloak-data:
+    driver: local
+
+services:
+  # ---------------------------------------------------------------------------
+  # MariaDB - Primary database for both the broker and Keycloak
+  # ---------------------------------------------------------------------------
+  mariadb:
+    image: mariadb:11.4
+    container_name: ieb-mariadb
+    restart: unless-stopped
+    networks:
+      - broker-net
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-change-me-in-production}
+      MYSQL_DATABASE: ${MARIADB_DATABASE:-identitybroker}
+      MYSQL_USER: ${MARIADB_USER:-ieb_user}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD:-ieb_password}
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test:
+        ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Keycloak - OIDC Provider (identity broker / local auth)
+  # ---------------------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: ieb-keycloak
+    restart: unless-stopped
+    networks:
+      - broker-net
+    ports:
+      - "8080:8080"
+    environment:
+      KC_DB: mariadb
+      KC_DB_URL: jdbc:mariadb://mariadb:3306/keycloak
+      KC_DB_USERNAME: ${MARIADB_USER:-ieb_user}
+      KC_DB_PASSWORD: ${MARIADB_PASSWORD:-ieb_password}
+      KC_HOSTNAME: ${KC_HOSTNAME:-localhost}
+      KC_HOSTNAME_PORT: 8080
+      KC_HTTP_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-change-me-in-production}
+      KC_LOG_LEVEL: INFO
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    command: ["start-dev", "--import-realm"]
+
+  # ---------------------------------------------------------------------------
+  # OPA - Open Policy Agent (externalized policy engine)
+  # ---------------------------------------------------------------------------
+  opa:
+    image: openpolicyagent/opa:1.0
+    container_name: ieb-opa
+    restart: unless-stopped
+    networks:
+      - broker-net
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies/opa:/policies
+    command:
+      - "run"
+      - "--server"
+      - "--log-level=debug"
+      - "--addr=:8181"
+      - "/policies"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8181/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # API Server (Quarkus Java)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: src/main/docker/Dockerfile.jvm
+    container_name: ieb-api
+    restart: unless-stopped
+    networks:
+      - broker-net
+    ports:
+      - "8081:8081"
+    environment:
+      # Database
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:mariadb://mariadb:3306/identitybroker
+      QUARKUS_DATASOURCE_USERNAME: ${MARIADB_USER:-ieb_user}
+      QUARKUS_DATASOURCE_PASSWORD: ${MARIADB_PASSWORD:-ieb_password}
+      # OIDC (Keycloak)
+      QUARKUS_OIDC_AUTH_SERVER_URL: ${QUARKUS_OIDC_AUTH_SERVER_URL:-http://keycloak:8080/realms/identity-broker}
+      QUARKUS_OIDC_CLIENT_ID: ${QUARKUS_OIDC_CLIENT_ID:-identity-broker-api}
+      QUARKUS_OIDC_CREDENTIALS_SECRET: ${QUARKUS_OIDC_CLIENT_SECRET:-""}
+      # OPA
+      OPA_URL: ${OPA_URL:-http://opa:8181/v1/data}
+      # Dev auth
+      DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-false}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  # ---------------------------------------------------------------------------
+  # Web Dashboard (Vue/React frontend)
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: ieb-web
+    restart: unless-stopped
+    networks:
+      - broker-net
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8081}
+    depends_on:
+      - api
+
+  # ---------------------------------------------------------------------------
+  # Qdrant - Vector database (optional, for advanced audit search)
+  # ---------------------------------------------------------------------------
+  # qdrant:
+  #   image: qdrant/qdrant:v1.12
+  #   container_name: ieb-qdrant
+  #   restart: unless-stopped
+  #   networks:
+  #     - broker-net
+  #   ports:
+  #     - "6333:6333"
+  #     - "6334:6334"
+  #   volumes:
+  #     - ./data/qdrant-storage:/qdrant/storage

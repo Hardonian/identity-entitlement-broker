@@ -1,0 +1,40 @@
+sequenceDiagram
+  participant TenantAUser as Tenant A User
+  participant TenantBUser as Tenant B User
+  participant API as API Gateway
+  participant Filter as TenantContext Filter
+  participant Service as Business Service
+  participant DB as MariaDB
+
+  Note over API,DB: Tenant A - Legitimate Access
+  TenantAUser->>API: GET /scim/v2/Users/me
+  Note over TenantAUser: JWT with tenant_id=A
+  API->>Filter: Intercept request
+  Filter->>Filter: Extract tenant_id from JWT
+  Filter->>Filter: Validate tenant exists & active
+  Filter->>Service: Set TenantContext(tenant_id=A)
+  Service->>DB: SELECT * FROM external_users WHERE tenant_id='A'
+  DB->>Service: Tenant A's users
+  Service->>TenantAUser: 200 OK (Tenant A data)
+
+  Note over API,DB: Tenant B - Legitimate Access
+  TenantBUser->>API: GET /scim/v2/Users/me
+  Note over TenantBUser: JWT with tenant_id=B
+  API->>Filter: Intercept request
+  Filter->>Filter: Extract tenant_id=B
+  Filter->>Filter: Validate tenant exists & active
+  Filter->>Service: Set TenantContext(tenant_id=B)
+  Service->>DB: SELECT * FROM external_users WHERE tenant_id='B'
+  DB->>Service: Tenant B's users (completely isolated)
+  Service->>TenantBUser: 200 OK (Tenant B data)
+
+  Note over API,DB: Tenant B attempting cross-tenant access to Tenant A resource
+  TenantBUser->>API: GET /scim/v2/Users/TENANT_A_USER_ID
+  Note over TenantBUser: JWT with tenant_id=B but requests Tenant A's resource
+  API->>Filter: Intercept request
+  Filter->>Filter: Set TenantContext(tenant_id=B)
+  Filter->>Service: findUserById(TENANT_A_USER_ID)
+  Service->>DB: SELECT * FROM external_users WHERE id=TENANT_A_USER_ID AND tenant_id='B'
+  DB->>Service: Empty result (user belongs to tenant A)
+  Service->>Filter: User not found
+  Filter->>TenantBUser: 404 Not Found (tenant-agnostic error)

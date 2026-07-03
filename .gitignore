@@ -1,0 +1,108 @@
+# =============================================================================
+# Identity Entitlement Broker - .gitignore
+# =============================================================================
+
+# --- Environment & Secrets ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.crt
+secrets/
+vault/
+
+# --- Java / Maven ---
+apps/api/target/
+apps/api/*.jar
+apps/api/*.war
+*.class
+*.jar
+*.war
+*.nar
+~.m2/
+.mvn/timing.log
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# --- Node.js / Frontend ---
+apps/web/node_modules/
+apps/web/dist/
+apps/web/build/
+apps/web/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# --- IDE & Editor ---
+.idea/
+*.iml
+*.iws
+*.swp
+*.swo
+*~
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.sublime-workspace
+
+# --- OS Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# --- Docker ---
+data/
+docker-volumes/
+*.tar
+*.gz
+
+# --- Logs ---
+*.log
+logs/
+/apps/api/logs/
+
+# --- Test Reports ---
+test-reports/
+allure-results/
+target/surefire-reports/
+target/failsafe-reports/
+
+# --- Build Artifacts ---
+*.class
+*.jar
+*.war
+*.nar
+hs_err_pid*
+replay_pid*
+
+# --- Python (for scripts) ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+
+# --- Mermaid / Diagram exports ---
+docs/diagrams/*.svg
+docs/diagrams/*.png
+
+# --- Coverage ---
+coverage/
+.coverage
+*.coverage.*
+lcov.info

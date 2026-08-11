@@ -106,3 +106,7 @@ coverage/
 .coverage
 *.coverage.*
 lcov.info
+node_modules/
+build/
+.pytest_cache/
+*.pyc
